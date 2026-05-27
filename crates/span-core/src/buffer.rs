@@ -29,6 +29,14 @@ pub struct AudioRingBuffer {
     read_pos: CachePadded<AtomicUsize>,
 }
 
+// SAFETY: AudioRingBuffer is a single-producer single-consumer (SPSC) lock-free
+// ring buffer.  Only the writer touches `write_pos` and only the reader touches
+// `read_pos`; both atomics use Acquire/Release ordering to form a correct
+// happens-before relationship.  The underlying `Vec<f32>` is accessed only at
+// indices guarded by those atomics, so sharing a `&AudioRingBuffer` across
+// threads is sound as long as at most one writer and one reader exist.
+unsafe impl Sync for AudioRingBuffer {}
+
 impl Display for AudioRingBuffer {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
@@ -42,7 +50,7 @@ impl Display for AudioRingBuffer {
 }
 
 impl AudioRingBuffer {
-    fn new(capacity_frames: usize) -> Self {
+    pub fn new(capacity_frames: usize) -> Self {
         // Ensure capacity is a power of 2 for efficient wrapping
         let capacity = capacity_frames.next_power_of_two();
         Self {
