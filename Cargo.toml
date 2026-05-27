@@ -1,0 +1,9 @@
+[workspace]
+members = [
+    "crates/span-core",
+    "crates/span-capture",
+    "crates/span-transport",
+    "targets/desktop-node",
+    "targets/wasm-client",
+]
+resolver = "2"
