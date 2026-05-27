@@ -1,3 +1,3 @@
-pub mod traits;
-pub mod errors;
 pub mod buffer;
+pub mod errors;
+pub mod traits;

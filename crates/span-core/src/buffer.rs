@@ -1,8 +1,10 @@
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::cell::UnsafeCell;
 use std::fmt::Display;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 #[derive(Debug, PartialEq, Eq)]
 #[repr(align(64))]
+/// A simple wrapper to ensure the atomic variables are cache-line aligned to prevent false sharing between threads
 struct CachePadded<T>(T);
 
 impl CachePadded<AtomicUsize> {
@@ -18,7 +20,7 @@ impl CachePadded<AtomicUsize> {
 #[derive(Debug)]
 pub struct AudioRingBuffer {
     /// A simple lock-free ring buffer for audio frames, used for buffering audio data between the audio source/sink and the core library
-    buffer: Vec<f32>,
+    buffer: UnsafeCell<Vec<f32>>,
     /// The capacity of the buffer in number of audio frames (not bytes)
     capacity: usize,
     /// The current write position in the buffer, updated by the audio source when it writes new data
@@ -29,10 +31,13 @@ pub struct AudioRingBuffer {
 
 impl Display for AudioRingBuffer {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "AudioRingBuffer {{ capacity: {}, write_pos: {}, read_pos: {} }}", 
-            self.capacity, 
-            self.write_pos.0.load(Ordering::Relaxed), 
-            self.read_pos.0.load(Ordering::Relaxed))
+        write!(
+            f,
+            "AudioRingBuffer {{ capacity: {}, write_pos: {}, read_pos: {} }}",
+            self.capacity,
+            self.write_pos.0.load(Ordering::Relaxed),
+            self.read_pos.0.load(Ordering::Relaxed)
+        )
     }
 }
 
@@ -41,14 +46,14 @@ impl AudioRingBuffer {
         // Ensure capacity is a power of 2 for efficient wrapping
         let capacity = capacity_frames.next_power_of_two();
         Self {
-            buffer: vec![0.0; capacity],
+            buffer: UnsafeCell::new(vec![0.0; capacity]),
             capacity: capacity,
             write_pos: CachePadded(AtomicUsize::new(0)),
             read_pos: CachePadded(AtomicUsize::new(0)),
         }
     }
 
-    pub fn push(&mut self, data: &[f32]) -> usize {
+    pub fn push(&self, data: &[f32]) -> usize {
         let mut written = 0;
         for sample in data.iter() {
             let write_pos = self.write_pos.load(Ordering::Relaxed);
@@ -57,7 +62,9 @@ impl AudioRingBuffer {
                 // Buffer is full, stop writing
                 break;
             }
-            self.buffer[write_pos] = *sample;
+            unsafe {
+                *(*self.buffer.get()).as_mut_ptr().add(write_pos) = *sample;
+            }
             self.write_pos.store(next_write_pos, Ordering::Release);
             written += 1;
         }
@@ -72,12 +79,11 @@ impl AudioRingBuffer {
                 // Buffer is empty, stop reading
                 break;
             }
-            *sample = self.buffer[read_pos];
+            *sample = unsafe { *(*self.buffer.get()).as_ptr().add(read_pos) };
             let next_read_pos = (read_pos + 1) & (self.capacity - 1);
             self.read_pos.store(next_read_pos, Ordering::Release);
             read += 1;
         }
         read
     }
-
 }
