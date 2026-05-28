@@ -74,7 +74,7 @@ sonic-span/
 *Establish core architecture and transmit uncompressed PCM audio over a local network.*
 
 - [√] Initialize Cargo workspace and define `AudioSource`, `AudioSink`, and `NetworkTransport` traits
-- [ ] Implement a lock-free ring buffer in `span-core` for thread-safe cross-boundary data handoffs
+- [√] Implement a lock-free ring buffer in `span-core` for thread-safe cross-boundary data handoffs
 - [ ] Implement local system audio loopback capture using `cpal` (Windows/macOS/Linux)
 - [ ] Build a rudimentary UDP transport layer using asynchronous I/O (`tokio`)
 - [ ] Create a basic CLI transmitter (PC) and CLI receiver (PC) to verify end-to-end transmission
