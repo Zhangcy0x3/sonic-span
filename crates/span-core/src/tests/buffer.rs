@@ -119,13 +119,13 @@ fn wrap_around_sequential() {
 
 #[test]
 fn wrap_around_with_overwrite_protection() {
-    // Buffer size 64, capacity 63 (cap - 1)
+    // Buffer size 64, capacity 64
     let buf = AudioRingBuffer::new(64);
 
-    // Write 63 samples (max capacity)
-    let signal = generate_test_signal(63, 6.0);
+    // Write 64 samples (max capacity)
+    let signal = generate_test_signal(64, 6.0);
     let written = buf.push(&signal);
-    assert_eq!(written, 63);
+    assert_eq!(written, 64);
 
     // Try to write more — should be rejected
     let extra = generate_test_signal(10, 7.0);
@@ -133,9 +133,9 @@ fn wrap_around_with_overwrite_protection() {
     assert_eq!(overflow, 0, "must reject writes when full");
 
     // Read all, then write should succeed
-    let mut drain = vec![0.0f32; 63];
+    let mut drain = vec![0.0f32; 64];
     let read = buf.pop(&mut drain);
-    assert_eq!(read, 63);
+    assert_eq!(read, 64);
     assert_eq!(drain, signal);
 
     let written2 = buf.push(&extra);
@@ -364,45 +364,47 @@ fn zero_length_pop() {
 #[test]
 fn capacity_is_power_of_two_rounded_up() {
     // Push enough to verify capacity works; edge: exactly power-of-2 input
-    let buf = AudioRingBuffer::new(100); // rounds up to 128, usable = 127
-    let signal = generate_test_signal(127, 9.0);
+    let buf = AudioRingBuffer::new(100); // rounds up to 128, usable = 128
+    let signal = generate_test_signal(128, 9.0);
     let written = buf.push(&signal);
-    assert_eq!(written, 127);
+    assert_eq!(written, 128);
 
     // One more should fail
     assert_eq!(buf.push(&[0.5]), 0);
 
-    let mut out = vec![0.0f32; 127];
-    assert_eq!(buf.pop(&mut out), 127);
+    let mut out = vec![0.0f32; 128];
+    assert_eq!(buf.pop(&mut out), 128);
 }
 
 #[test]
 fn minimum_capacity() {
-    // next_power_of_two(1) = 1, usable = 0 → effectively unusable
-    // next_power_of_two(2) = 2, usable = 1
+    // next_power_of_two(1) = 1, usable = 1 → effectively unusable
+    // next_power_of_two(2) = 2, usable = 2
     let buf = AudioRingBuffer::new(2);
     assert_eq!(buf.push(&[1.0]), 1);
-    assert_eq!(buf.push(&[2.0]), 0, "buffer should be full after 1 sample");
-    let mut out = [0.0f32; 1];
-    assert_eq!(buf.pop(&mut out), 1);
+    assert_eq!(buf.push(&[1.0]), 1);
+    assert_eq!(buf.push(&[2.0]), 0, "buffer should be full after 2 sample");
+    let mut out = [0.0f32; 2];
+    assert_eq!(buf.pop(&mut out), 2);
     assert_eq!(out[0], 1.0);
+    assert_eq!(out[1], 1.0);
 }
 
 #[test]
 fn alternating_full_empty_cycles() {
-    let buf = AudioRingBuffer::new(256); // capacity = 256, usable = 255
-    let signal = generate_test_signal(255, 10.0);
+    let buf = AudioRingBuffer::new(256); // capacity = 256, usable = 256
+    let signal = generate_test_signal(256, 10.0);
 
     for cycle in 0..10 {
         // Fill
         let w = buf.push(&signal);
-        assert_eq!(w, 255, "cycle {cycle}: should write all 255 samples");
+        assert_eq!(w, 256, "cycle {cycle}: should write all 256 samples");
         assert_eq!(buf.push(&[0.0]), 0, "cycle {cycle}: should be full");
 
         // Drain
-        let mut out = vec![0.0f32; 255];
+        let mut out = vec![0.0f32; 256];
         let r = buf.pop(&mut out);
-        assert_eq!(r, 255, "cycle {cycle}: should read all 255 samples");
+        assert_eq!(r, 256, "cycle {cycle}: should read all 256 samples");
         assert_eq!(out, signal, "cycle {cycle}: data mismatch");
         assert_eq!(
             buf.pop(&mut [0.0f32; 1]),
