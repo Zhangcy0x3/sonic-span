@@ -15,6 +15,12 @@ use crate::buffer::AudioRingBuffer;
 /// Maximum number of packets held for reordering before they are declared lost.
 pub const MAX_REORDER_PACKETS: usize = 64;
 
+/// Consecutive empty reads tolerated before an in-window gap is declared lost.
+///
+/// A delayed packet may arrive a read or two late; only declare it lost once
+/// playback has actually stalled on the gap.
+pub const REORDER_GRACE_READS: usize = 4;
+
 /// Tuning parameters for a [`JitterBuffer`].
 #[derive(Debug, Clone, Copy)]
 pub struct JitterBufferConfig {
@@ -55,6 +61,8 @@ pub struct JitterBuffer {
     /// Packets that arrived before their turn (out-of-order delivery).
     pending: BTreeMap<u32, Vec<f32>>,
     next_expected: Option<u32>,
+    /// Consecutive reads that stalled on a missing in-window packet.
+    stall_count: usize,
     target_frames: usize,
     stats: JitterStats,
     started: bool,
@@ -72,6 +80,7 @@ impl JitterBuffer {
             ring: AudioRingBuffer::new(capacity.max(1024)),
             pending: BTreeMap::new(),
             next_expected: None,
+            stall_count: 0,
             target_frames: target_frames.max(1),
             stats: JitterStats {
                 latency: config.initial_latency,
@@ -121,17 +130,24 @@ impl JitterBuffer {
     pub fn read(&mut self, out: &mut [f32]) -> usize {
         // If the ring is empty but reordered packets are already waiting, the
         // missing sequence numbers are effectively lost: jump to the oldest
-        // waiting packet so playback does not stall on an in-flight gap.
+        // waiting packet so playback does not stall on an in-flight gap. Small
+        // gaps get a grace period because the missing packet may still arrive.
         if self.ring.is_empty() {
-            if let Some(expected) = self.next_expected {
-                if let Some(&first) = self.pending.keys().next() {
-                    if first != expected {
-                        self.stats.packets_lost += u64::from(first.wrapping_sub(expected));
+            match (self.next_expected, self.pending.keys().next().copied()) {
+                (Some(expected), Some(first)) if first != expected => {
+                    self.stall_count += 1;
+                    let gap = first.wrapping_sub(expected);
+                    if gap > MAX_REORDER_PACKETS as u32 || self.stall_count >= REORDER_GRACE_READS {
+                        self.stats.packets_lost += u64::from(gap);
                         self.next_expected = Some(first);
+                        self.stall_count = 0;
                         self.drain_pending();
                     }
                 }
+                _ => self.stall_count = 0,
             }
+        } else {
+            self.stall_count = 0;
         }
         let n = self.ring.pop(out);
         for slot in &mut out[n..] {
@@ -179,6 +195,7 @@ impl JitterBuffer {
             if let Some(samples) = self.pending.remove(&expected) {
                 self.push_into_ring(&samples);
                 self.next_expected = Some(expected.wrapping_add(1));
+                self.stall_count = 0;
                 continue;
             }
             // The next packet is missing, but something far ahead has already
@@ -265,13 +282,47 @@ mod tests {
         jitter.push(5, packet(5.0, frames)); // packets 3 and 4 are lost
 
         let mut out = vec![0.0f32; frames * 2 * 5];
-        let n1 = jitter.read(&mut out); // packets 1 and 2
-        let n2 = jitter.read(&mut out[n1..]); // packet 5, gap declared lost
-        assert_eq!(n1, frames * 2 * 2);
-        assert_eq!(n2, frames * 2);
+        let mut total = 0;
+        for _ in 0..16 {
+            let n = jitter.read(&mut out[total..]);
+            total += n;
+            if jitter.buffered_frames() == 0 && n == 0 {
+                break;
+            }
+        }
+        // Packets 1, 2, and 5 play; 3 and 4 are declared lost after the
+        // grace period.
+        assert_eq!(total, frames * 2 * 3);
         assert_eq!(out[frames * 2], 2.0);
-        assert_eq!(out[n1], 5.0);
+        assert_eq!(out[frames * 2 * 2], 5.0);
         assert_eq!(jitter.stats().packets_lost, 2);
+    }
+
+    #[test]
+    fn waits_for_in_window_late_packets_without_losing_them() {
+        let mut jitter = JitterBuffer::new(config());
+        let frames = 100;
+        jitter.push(1, packet(1.0, frames));
+        jitter.push(2, packet(2.0, frames));
+        jitter.push(4, packet(4.0, frames));
+
+        // One stalled read: the gap is not yet declared lost.
+        let mut out = vec![0.0f32; frames * 2 * 4];
+        let n1 = jitter.read(&mut out);
+        assert_eq!(n1, frames * 2 * 2); // packets 1 and 2
+        assert_eq!(jitter.stats().packets_lost, 0);
+
+        // Packet 3 arrives within the grace period and plays in order.
+        jitter.push(3, packet(3.0, frames));
+        let mut total = n1;
+        for _ in 0..4 {
+            total += jitter.read(&mut out[total..]);
+        }
+        assert_eq!(total, frames * 2 * 4);
+        assert_eq!(out[frames * 2 * 2], 3.0);
+        assert_eq!(out[frames * 2 * 3], 4.0);
+        assert_eq!(jitter.stats().packets_lost, 0);
+        assert_eq!(jitter.stats().late_packets, 0);
     }
 
     #[test]
