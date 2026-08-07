@@ -52,9 +52,9 @@ jobs:
           done
           if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
             gh release edit "$GITHUB_REF_NAME" --notes-file RELEASE_NOTES.md >>"$LOG" 2>&1
-            gh release upload "$GITHUB_REF_NAME" dist/* --clobber >>"$LOG" 2>&1
+            gh release upload "$GITHUB_REF_NAME" dist/*.tar.gz dist/*.zip --clobber >>"$LOG" 2>&1
           else
-            gh release create "$GITHUB_REF_NAME" dist/* --title "SonicSpan $GITHUB_REF_NAME" --notes-file RELEASE_NOTES.md >>"$LOG" 2>&1
+            gh release create "$GITHUB_REF_NAME" dist/*.tar.gz dist/*.zip --title "SonicSpan $GITHUB_REF_NAME" --notes-file RELEASE_NOTES.md >>"$LOG" 2>&1
           fi
           RC=$?
           set -e
@@ -117,9 +117,9 @@ jobs:
           done
           if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
             gh release edit "$GITHUB_REF_NAME"
-            gh release upload "$GITHUB_REF_NAME" dist/* --clobber >>"$LOG" 2>&1
+            gh release upload "$GITHUB_REF_NAME" dist/*.zip --clobber >>"$LOG" 2>&1
           else
-            gh release create "$GITHUB_REF_NAME" dist/* --title "SonicSpan $GITHUB_REF_NAME" --notes-file RELEASE_NOTES.md >>"$LOG" 2>&1
+            gh release create "$GITHUB_REF_NAME" dist/*.zip --title "SonicSpan $GITHUB_REF_NAME" --notes-file RELEASE_NOTES.md >>"$LOG" 2>&1
           fi
           RC=$?
           set -e
@@ -188,9 +188,9 @@ jobs:
           done
           if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
             gh release edit "$GITHUB_REF_NAME"
-            gh release upload "$GITHUB_REF_NAME" dist/* --clobber >>"$LOG" 2>&1
+            gh release upload "$GITHUB_REF_NAME" dist/*.apk --clobber >>"$LOG" 2>&1
           else
-            gh release create "$GITHUB_REF_NAME" dist/* --title "SonicSpan $GITHUB_REF_NAME" --notes-file RELEASE_NOTES.md >>"$LOG" 2>&1
+            gh release create "$GITHUB_REF_NAME" dist/*.apk --title "SonicSpan $GITHUB_REF_NAME" --notes-file RELEASE_NOTES.md >>"$LOG" 2>&1
           fi
           RC=$?
           set -e
