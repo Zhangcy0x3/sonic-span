@@ -1240,7 +1240,12 @@ dependencies = [
 name = "wasm-client"
 version = "0.1.0"
 dependencies = [
+ "js-sys",
  "span-core",
+ "span-transport",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
+ "web-sys",
 ]
 
 [[package]]

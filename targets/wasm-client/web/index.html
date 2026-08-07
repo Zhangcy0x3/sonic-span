@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>SonicSpan</title>
+    <style>
+      :root {
+        color-scheme: dark;
+      }
+      body {
+        margin: 0;
+        min-height: 100vh;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: #111318;
+        color: #e8eaf0;
+        font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+      }
+      .card {
+        width: min(92vw, 420px);
+        padding: 2rem;
+        border-radius: 16px;
+        background: #1a1e26;
+        border: 1px solid #2a2f3a;
+      }
+      h1 {
+        margin: 0 0 0.25rem;
+        font-size: 1.5rem;
+      }
+      p.subtitle {
+        margin: 0 0 1.5rem;
+        color: #9aa3b2;
+        font-size: 0.9rem;
+      }
+      form {
+        display: flex;
+        gap: 0.5rem;
+      }
+      input[type="text"] {
+        flex: 1;
+        padding: 0.6rem 0.8rem;
+        border-radius: 8px;
+        border: 1px solid #333a48;
+        background: #12151b;
+        color: #e8eaf0;
+        font-size: 0.9rem;
+      }
+      button {
+        padding: 0.6rem 1.1rem;
+        border: none;
+        border-radius: 8px;
+        background: #4f7cff;
+        color: #fff;
+        font-weight: 600;
+        cursor: pointer;
+      }
+      button:hover {
+        background: #638bff;
+      }
+      .row {
+        display: flex;
+        align-items: center;
+        gap: 0.75rem;
+        margin-top: 1.25rem;
+        font-size: 0.9rem;
+        color: #9aa3b2;
+      }
+      .row input[type="range"] {
+        flex: 1;
+      }
+      #status {
+        margin-top: 1.25rem;
+        padding: 0.7rem 0.9rem;
+        border-radius: 8px;
+        background: #12151b;
+        border: 1px solid #2a2f3a;
+        font-size: 0.85rem;
+        min-height: 1.2em;
+      }
+      #stats {
+        margin-top: 0.5rem;
+        font-size: 0.8rem;
+        color: #6f7887;
+        text-align: right;
+      }
+    </style>
+  </head>
+  <body>
+    <main class="card">
+      <h1>SonicSpan</h1>
+      <p class="subtitle">Stream desktop audio straight to this browser.</p>
+      <form id="connect-form">
+        <input
+          id="server-url"
+          type="text"
+          placeholder="ws://192.168.1.10:8080/ws (blank = this page)"
+          autocomplete="off"
+        />
+        <button id="connect-btn" type="submit">Connect</button>
+      </form>
+      <div class="row">
+        <label for="volume">Volume</label>
+        <input id="volume" type="range" min="0" max="1" step="0.01" value="1" />
+      </div>
+      <div id="status">Not connected.</div>
+      <div id="stats"></div>
+    </main>
+    <script type="module" src="./app.js"></script>
+  </body>
+</html>

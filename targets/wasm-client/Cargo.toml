@@ -3,5 +3,30 @@ name = "wasm-client"
 version = "0.1.0"
 edition = "2021"
 
+[lib]
+crate-type = ["cdylib", "rlib"]
+
 [dependencies]
 span-core = { path = "../../crates/span-core" }
+span-transport = { path = "../../crates/span-transport", default-features = false }
+wasm-bindgen = "0.2"
+wasm-bindgen-futures = "0.4"
+js-sys = "0.3"
+web-sys = { version = "0.3", features = [
+    "AudioContext",
+    "AudioContextOptions",
+    "AudioDestinationNode",
+    "AudioNode",
+    "AudioParam",
+    "AudioWorklet",
+    "AudioWorkletNode",
+    "AudioWorkletNodeOptions",
+    "BaseAudioContext",
+    "BinaryType",
+    "CloseEvent",
+    "Event",
+    "GainNode",
+    "MessageEvent",
+    "MessagePort",
+    "WebSocket",
+] }
