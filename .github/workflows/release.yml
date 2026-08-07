@@ -43,12 +43,22 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          ls -la dist
+          LOG=$(mktemp)
+          set +e
           if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
-            gh release edit "$GITHUB_REF_NAME" --notes-file RELEASE_NOTES.md
-            gh release upload "$GITHUB_REF_NAME" dist/* --clobber
+            gh release edit "$GITHUB_REF_NAME" --notes-file RELEASE_NOTES.md >>"$LOG" 2>&1
+            gh release upload "$GITHUB_REF_NAME" dist/* --clobber >>"$LOG" 2>&1
           else
-            gh release create "$GITHUB_REF_NAME" dist/* --title "SonicSpan $GITHUB_REF_NAME" --notes-file RELEASE_NOTES.md
+            gh release create "$GITHUB_REF_NAME" dist/* --title "SonicSpan $GITHUB_REF_NAME" --notes-file RELEASE_NOTES.md >>"$LOG" 2>&1
           fi
+          RC=$?
+          set -e
+          if [ $RC -ne 0 ]; then
+            echo "::error title=gh release failed ($RC)::$(tail -c 2000 "$LOG")"
+            exit $RC
+          fi
+          gh release view "$GITHUB_REF_NAME" --json tagName,assets --jq '.tagName + " assets=" + (.assets|length|tostring)'
 
   windows:
     name: Build Windows package
@@ -95,12 +105,22 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          ls -la dist
+          LOG=$(mktemp)
+          set +e
           if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
             gh release edit "$GITHUB_REF_NAME"
-            gh release upload "$GITHUB_REF_NAME" dist/* --clobber
+            gh release upload "$GITHUB_REF_NAME" dist/* --clobber >>"$LOG" 2>&1
           else
-            gh release create "$GITHUB_REF_NAME" dist/* --title "SonicSpan $GITHUB_REF_NAME" --notes-file RELEASE_NOTES.md
+            gh release create "$GITHUB_REF_NAME" dist/* --title "SonicSpan $GITHUB_REF_NAME" --notes-file RELEASE_NOTES.md >>"$LOG" 2>&1
           fi
+          RC=$?
+          set -e
+          if [ $RC -ne 0 ]; then
+            echo "::error title=gh release failed ($RC)::$(tail -c 2000 "$LOG")"
+            exit $RC
+          fi
+          gh release view "$GITHUB_REF_NAME" --json tagName,assets --jq '.tagName + " assets=" + (.assets|length|tostring)'
 
   android:
     name: Build Android APK
@@ -153,9 +173,19 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          ls -la dist
+          LOG=$(mktemp)
+          set +e
           if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
             gh release edit "$GITHUB_REF_NAME"
-            gh release upload "$GITHUB_REF_NAME" dist/* --clobber
+            gh release upload "$GITHUB_REF_NAME" dist/* --clobber >>"$LOG" 2>&1
           else
-            gh release create "$GITHUB_REF_NAME" dist/* --title "SonicSpan $GITHUB_REF_NAME" --notes-file RELEASE_NOTES.md
+            gh release create "$GITHUB_REF_NAME" dist/* --title "SonicSpan $GITHUB_REF_NAME" --notes-file RELEASE_NOTES.md >>"$LOG" 2>&1
           fi
+          RC=$?
+          set -e
+          if [ $RC -ne 0 ]; then
+            echo "::error title=gh release failed ($RC)::$(tail -c 2000 "$LOG")"
+            exit $RC
+          fi
+          gh release view "$GITHUB_REF_NAME" --json tagName,assets --jq '.tagName + " assets=" + (.assets|length|tostring)'
