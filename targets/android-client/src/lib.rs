@@ -1,16 +1,19 @@
-//! Android receiver for SonicSpan.
+//! Android client for SonicSpan: receiver and transmitter.
 //!
-//! A JNI entry point starts a background thread that receives UDP packets
-//! (from `desktop-node transmit`), decodes PCM or Opus, runs them through the
-//! jitter buffer and drift compensator, and plays the result through an
-//! `AudioTrack`.
+//! The receiver thread gets UDP packets from `desktop-node transmit`, decodes
+//! PCM or Opus, runs them through the jitter buffer and drift compensator,
+//! and plays the result through an `AudioTrack`. The transmitter thread
+//! captures the microphone through `AudioRecord` and sends PCM or Opus
+//! packets to `desktop-node receive`.
 
 mod audio;
 mod receiver;
+mod transmitter;
 
 use std::net::SocketAddr;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use anyhow::{Context, Result};
 use jni::objects::{GlobalRef, JObject, JString, JValue};
@@ -18,11 +21,13 @@ use jni::sys::{jfloat, jint};
 use jni::{JNIEnv, JavaVM};
 use receiver::{Receiver, ReceiverConfig, ReceiverStats};
 use span_core::traits::NetworkTransport;
-use span_transport::protocol::PcmPacket;
+use span_transport::protocol::{PcmPacket, HEADER_SIZE};
 use span_transport::udp::UdpTransport;
 use tokio::sync::Notify;
 
 use crate::audio::AndroidAudioPlayer;
+use crate::audio::AndroidMicCapture;
+use crate::transmitter::{Transmitter, TransmitterConfig};
 
 struct Shared {
     vm: JavaVM,
@@ -40,10 +45,26 @@ struct AndroidReceiver {
 
 static RECEIVER: Mutex<Option<AndroidReceiver>> = Mutex::new(None);
 
-fn notify_status(env: &mut JNIEnv, shared: &Shared, message: &str) {
+struct TxShared {
+    vm: JavaVM,
+    stop: AtomicBool,
+    notify: Notify,
+    /// Global ref to the current `AudioRecord`, for UI-thread stop.
+    record: Mutex<Option<GlobalRef>>,
+    listener: GlobalRef,
+}
+
+struct AndroidTransmitter {
+    shared: Arc<TxShared>,
+    thread: Option<std::thread::JoinHandle<()>>,
+}
+
+static TRANSMITTER: Mutex<Option<AndroidTransmitter>> = Mutex::new(None);
+
+fn notify_status(env: &mut JNIEnv, listener: &GlobalRef, message: &str) {
     if let Ok(js) = env.new_string(message) {
         let _ = env.call_method(
-            shared.listener.as_obj(),
+            listener.as_obj(),
             "onStatus",
             "(Ljava/lang/String;)V",
             &[JValue::Object(&js)],
@@ -51,9 +72,9 @@ fn notify_status(env: &mut JNIEnv, shared: &Shared, message: &str) {
     }
 }
 
-fn notify_stats(env: &mut JNIEnv, shared: &Shared, stats: &ReceiverStats) {
+fn notify_stats(env: &mut JNIEnv, listener: &GlobalRef, stats: &ReceiverStats) {
     let _ = env.call_method(
-        shared.listener.as_obj(),
+        listener.as_obj(),
         "onStats",
         "(JJJ)V",
         &[
@@ -61,6 +82,15 @@ fn notify_stats(env: &mut JNIEnv, shared: &Shared, stats: &ReceiverStats) {
             JValue::Long(stats.packets_lost as i64),
             JValue::Long(stats.underruns as i64),
         ],
+    );
+}
+
+fn notify_tx_stats(env: &mut JNIEnv, listener: &GlobalRef, packets: u64, bytes: u64) {
+    let _ = env.call_method(
+        listener.as_obj(),
+        "onTxStats",
+        "(JJ)V",
+        &[JValue::Long(packets as i64), JValue::Long(bytes as i64)],
     );
 }
 
@@ -88,7 +118,7 @@ pub extern "system" fn Java_com_sonicspan_MainActivity_nativeStart(
     if let Some(existing) = slot.as_ref() {
         notify_status(
             &mut env,
-            &existing.shared,
+            &existing.shared.listener,
             "already running; press Stop first",
         );
         return;
@@ -127,14 +157,16 @@ pub extern "system" fn Java_com_sonicspan_MainActivity_nativeStart(
                 return;
             }
         };
-        notify_status(&mut env, &thread_shared, "connecting");
+        notify_status(&mut env, &thread_shared.listener, "connecting");
 
         let addr: SocketAddr = match format!("{host}:{port}").parse() {
             Ok(addr) => addr,
             Err(e) => {
-                notify_status(&mut env, &thread_shared, &format!("invalid address: {e}"));
-                // SAFETY: this thread was attached by `attach_current_thread`
-                // above and is about to exit.
+                notify_status(
+                    &mut env,
+                    &thread_shared.listener,
+                    &format!("invalid address: {e}"),
+                );
                 // SAFETY: this thread was attached by `attach_current_thread`
                 // above and is about to exit.
                 unsafe {
@@ -151,11 +183,9 @@ pub extern "system" fn Java_com_sonicspan_MainActivity_nativeStart(
             Err(e) => {
                 notify_status(
                     &mut env,
-                    &thread_shared,
+                    &thread_shared.listener,
                     &format!("failed to start runtime: {e}"),
                 );
-                // SAFETY: this thread was attached by `attach_current_thread`
-                // above and is about to exit.
                 // SAFETY: this thread was attached by `attach_current_thread`
                 // above and is about to exit.
                 unsafe {
@@ -169,17 +199,19 @@ pub extern "system" fn Java_com_sonicspan_MainActivity_nativeStart(
             let mut transport = match UdpTransport::bind(addr).await {
                 Ok(transport) => transport,
                 Err(e) => {
-                    notify_status(&mut env, &thread_shared, &format!("failed to bind: {e}"));
+                    notify_status(
+                        &mut env,
+                        &thread_shared.listener,
+                        &format!("failed to bind: {e}"),
+                    );
                     return Ok(());
                 }
             };
             run_loop(&mut env, &thread_shared, &mut transport).await
         });
         if let Err(e) = result {
-            notify_status(&mut env, &thread_shared, &format!("error: {e:#}"));
+            notify_status(&mut env, &thread_shared.listener, &format!("error: {e:#}"));
         }
-        // SAFETY: this thread was attached by `attach_current_thread` above
-        // and is about to exit.
         // SAFETY: this thread was attached by `attach_current_thread` above
         // and is about to exit.
         unsafe {
@@ -211,6 +243,21 @@ pub extern "system" fn Java_com_sonicspan_MainActivity_nativeStop(mut env: JNIEn
             let _ = thread.join();
         }
     }
+
+    // Stop an active transmitter as well.
+    if let Ok(mut slot) = TRANSMITTER.lock() {
+        if let Some(mut transmitter) = slot.take() {
+            transmitter.shared.stop.store(true, Ordering::SeqCst);
+            transmitter.shared.notify.notify_one();
+            // Unblock a blocking AudioRecord.read from the UI thread.
+            if let Some(record) = transmitter.shared.record.lock().unwrap().as_ref() {
+                let _ = env.call_method(record.as_obj(), "stop", "()V", &[]);
+            }
+            if let Some(thread) = transmitter.thread.take() {
+                let _ = thread.join();
+            }
+        }
+    }
 }
 
 /// Adjust playback volume (0.0–1.0).
@@ -232,6 +279,227 @@ pub extern "system" fn Java_com_sonicspan_MainActivity_nativeSetVolume(
             }
         }
     }
+}
+
+/// Start transmitting microphone audio to `desktop-node receive` at
+/// `host:port` (UDP, mono 48 kHz, Opus).
+#[no_mangle]
+pub extern "system" fn Java_com_sonicspan_MainActivity_nativeStartTransmit(
+    mut env: JNIEnv,
+    this: JObject,
+    host: JString,
+    port: jint,
+) {
+    let host: String = match env.get_string(&host) {
+        Ok(value) => value.into(),
+        Err(e) => {
+            let _ = env.exception_clear();
+            eprintln!("[android-client] failed to read host string: {e}");
+            return;
+        }
+    };
+
+    let mut slot = match TRANSMITTER.lock() {
+        Ok(slot) => slot,
+        Err(_) => return,
+    };
+    if slot.is_some() {
+        if let Some(existing) = slot.as_ref() {
+            notify_status(
+                &mut env,
+                &existing.shared.listener,
+                "already transmitting; press Stop first",
+            );
+        }
+        return;
+    }
+
+    let vm = match env.get_java_vm() {
+        Ok(vm) => vm,
+        Err(e) => {
+            let _ = env.exception_clear();
+            eprintln!("[android-client] failed to get JavaVM: {e}");
+            return;
+        }
+    };
+    let listener = match env.new_global_ref(&this) {
+        Ok(listener) => listener,
+        Err(e) => {
+            let _ = env.exception_clear();
+            eprintln!("[android-client] failed to keep listener reference: {e}");
+            return;
+        }
+    };
+    let shared = Arc::new(TxShared {
+        vm,
+        stop: AtomicBool::new(false),
+        notify: Notify::new(),
+        record: Mutex::new(None),
+        listener,
+    });
+
+    let thread_shared = Arc::clone(&shared);
+    let thread = std::thread::spawn(move || {
+        let mut env = match thread_shared.vm.attach_current_thread() {
+            Ok(env) => env,
+            Err(e) => {
+                eprintln!("[android-client] failed to attach thread: {e}");
+                return;
+            }
+        };
+
+        let addr: SocketAddr = match format!("{host}:{port}").parse() {
+            Ok(addr) => addr,
+            Err(e) => {
+                notify_status(
+                    &mut env,
+                    &thread_shared.listener,
+                    &format!("invalid address: {e}"),
+                );
+                // SAFETY: this thread was attached by `attach_current_thread`
+                // above and is about to exit.
+                unsafe {
+                    thread_shared.vm.detach_current_thread();
+                }
+                return;
+            }
+        };
+        let socket = match std::net::UdpSocket::bind("0.0.0.0:0") {
+            Ok(socket) => socket,
+            Err(e) => {
+                notify_status(
+                    &mut env,
+                    &thread_shared.listener,
+                    &format!("failed to open UDP socket: {e}"),
+                );
+                // SAFETY: this thread was attached by `attach_current_thread`
+                // above and is about to exit.
+                unsafe {
+                    thread_shared.vm.detach_current_thread();
+                }
+                return;
+            }
+        };
+        if let Err(e) = socket.connect(addr) {
+            notify_status(
+                &mut env,
+                &thread_shared.listener,
+                &format!("failed to connect to {addr}: {e}"),
+            );
+            // SAFETY: this thread was attached by `attach_current_thread`
+            // above and is about to exit.
+            unsafe {
+                thread_shared.vm.detach_current_thread();
+            }
+            return;
+        }
+
+        let mic = match AndroidMicCapture::create(&mut env, 48_000) {
+            Ok(mic) => mic,
+            Err(e) => {
+                notify_status(
+                    &mut env,
+                    &thread_shared.listener,
+                    &format!("microphone unavailable: {e:#}"),
+                );
+                // SAFETY: this thread was attached by `attach_current_thread`
+                // above and is about to exit.
+                unsafe {
+                    thread_shared.vm.detach_current_thread();
+                }
+                return;
+            }
+        };
+        *thread_shared.record.lock().unwrap() = Some(mic.global_ref());
+
+        let mut transmitter = match Transmitter::new(TransmitterConfig::default()) {
+            Ok(transmitter) => transmitter,
+            Err(e) => {
+                notify_status(
+                    &mut env,
+                    &thread_shared.listener,
+                    &format!("failed to create transmitter: {e}"),
+                );
+                // SAFETY: this thread was attached by `attach_current_thread`
+                // above and is about to exit.
+                unsafe {
+                    thread_shared.vm.detach_current_thread();
+                }
+                return;
+            }
+        };
+        notify_status(
+            &mut env,
+            &thread_shared.listener,
+            &format!("transmitting to {addr} (48 kHz mono, Opus)"),
+        );
+
+        let mut pcm = vec![0i16; 8192];
+        let mut floats = vec![0.0f32; 8192];
+        let mut sent_packets = 0u64;
+        let mut sent_bytes = 0u64;
+        loop {
+            if thread_shared.stop.load(Ordering::SeqCst) {
+                break;
+            }
+            let n = match mic.read_i16(&mut env, &mut pcm) {
+                Ok(n) => n,
+                Err(e) => {
+                    notify_status(
+                        &mut env,
+                        &thread_shared.listener,
+                        &format!("microphone read failed: {e:#}"),
+                    );
+                    break;
+                }
+            };
+            if n == 0 {
+                if thread_shared.stop.load(Ordering::SeqCst) {
+                    break;
+                }
+                std::thread::sleep(Duration::from_millis(5));
+                continue;
+            }
+            for (i, sample) in floats.iter_mut().take(n).enumerate() {
+                *sample = pcm[i] as f32 / 32_768.0;
+            }
+            match transmitter.process_pcm(&floats[..n]) {
+                Ok(packets) => {
+                    for packet in packets {
+                        let mut bytes = Vec::with_capacity(HEADER_SIZE + packet.payload.len());
+                        packet.encode(&mut bytes);
+                        if socket.send(&bytes).is_ok() {
+                            sent_packets += 1;
+                            sent_bytes += bytes.len() as u64;
+                        }
+                    }
+                }
+                Err(e) => notify_status(
+                    &mut env,
+                    &thread_shared.listener,
+                    &format!("encode failed: {e}"),
+                ),
+            }
+            if sent_packets > 0 && sent_packets.is_multiple_of(100) {
+                notify_tx_stats(&mut env, &thread_shared.listener, sent_packets, sent_bytes);
+            }
+        }
+
+        let _ = mic.stop(&mut env);
+        let _ = mic.release(&mut env);
+        *thread_shared.record.lock().unwrap() = None;
+        notify_status(&mut env, &thread_shared.listener, "transmit stopped");
+        // SAFETY: this thread was attached by `attach_current_thread` above
+        // and is about to exit.
+        unsafe {
+            thread_shared.vm.detach_current_thread();
+        }
+    });
+
+    *slot = Some(AndroidTransmitter {
+        shared,
+        thread: Some(thread),
+    });
 }
 
 async fn run_loop(
@@ -265,7 +533,11 @@ async fn run_loop(
                     *shared.track.lock().unwrap() = Some(new_player.global_ref());
                     player = Some(new_player);
                     player_cfg = Some(cfg);
-                    notify_status(env, shared, &format!("playing {} Hz / {} ch", cfg.0, cfg.1));
+                    notify_status(
+                        env,
+                        &shared.listener,
+                        &format!("playing {} Hz / {} ch", cfg.0, cfg.1),
+                    );
                 }
 
                 let out = receiver.process_packet(&packet)?;
@@ -274,7 +546,7 @@ async fn run_loop(
                 }
                 packets += 1;
                 if packets.is_multiple_of(200) {
-                    notify_stats(env, shared, &receiver.stats());
+                    notify_stats(env, &shared.listener, &receiver.stats());
                 }
             }
         }

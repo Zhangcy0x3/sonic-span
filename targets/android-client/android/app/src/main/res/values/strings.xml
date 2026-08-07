@@ -1,3 +1,7 @@
 <resources>
     <string name="app_name">SonicSpan</string>
+    <string-array name="modes">
+        <item>Receive audio</item>
+        <item>Transmit microphone</item>
+    </string-array>
 </resources>
