@@ -22,7 +22,7 @@
         └──────────┬──────────┘
                    │
         ┌──────────▼──────────┐
-        │  span-transport     │  UDP / WebRTC
+        │  span-transport     │  UDP / WebSocket
         └──────────┬──────────┘
                    │
         ┌──────────┴──────────┐
@@ -41,7 +41,6 @@
 sonic-span/
 ├── Cargo.toml                  # Workspace root manifest
 ├── README.md
-├── docs/                       # Architecture diagrams & API references
 ├── crates/
 │   ├── span-core/              # [I/O Agnostic] Ring buffers, state machines, traits
 │   │   └── src/
@@ -56,17 +55,17 @@ sonic-span/
 │       └── src/
 │           ├── udp.rs          # Low-latency UDP transport
 │           ├── websocket.rs    # WebSocket broadcast for browser clients
-│           └── webrtc.rs       # WebRTC data channels (Phase 3)
+│           └── protocol.rs     # Versioned wire format (PCM + Opus)
 ├── targets/
 │   ├── desktop-node/           # PC transmitter/receiver CLI
 │   │   └── src/main.rs
 │   └── wasm-client/            # Tablet/browser receiver
 │       ├── src/lib.rs          # WASM bindings → AudioSink
-│       ├── pkg/                # Compiled WASM output
 │       └── web/
 │           ├── index.html
 │           ├── app.js
-│           └── worklet.js      # AudioWorklet processor (Web Audio)
+│           ├── worklet.js      # AudioWorklet processor (Web Audio)
+│           └── pkg/            # Compiled WASM output (git-ignored)
 └── .github/workflows/          # CI/CD (Rust + WASM builds)
 ```
 
@@ -122,12 +121,11 @@ sonic-span/
 > so the PC and tablet clocks stay in sync. Browser clients continue to receive
 > uncompressed PCM (the default), so `desktop-node serve` works unchanged.
 
-### Phase 4: Ecosystem, Discovery, and Polish
-*Transform the library into a user-friendly application.*
+### Phase 4: Ecosystem, Discovery, and Polish — *abandoned*
 
-- [ ] Implement mDNS (Multicast DNS) for automatic local network device discovery
-- [ ] Build a lightweight system-tray GUI for the desktop node
-- [ ] Support bi-directional audio routing (tablet microphone → PC input) with Acoustic Echo Cancellation (AEC)
+Phase 4 (mDNS discovery, a system-tray GUI, and bidirectional audio routing)
+is explicitly out of scope and will not be implemented. The project is
+considered feature-complete at Phase 3.
 
 ---
 
@@ -137,6 +135,7 @@ sonic-span/
 
 - **Rust** 1.75+
 - **wasm-pack** (for WASM builds)
+- **cmake** (builds the bundled Opus library; preinstalled on most systems)
 - **cpal** system dependencies:
   - Linux: `libasound2-dev`
   - macOS: (pre-installed)
@@ -152,6 +151,9 @@ cargo build --release
 cd targets/wasm-client
 wasm-pack build --target web --out-dir web/pkg
 ```
+
+> Prebuilt packages (a `desktop-node` binary and a ready-to-serve browser
+> client) are attached to every [GitHub release](https://github.com/Zhangcy0x3/sonic-span/releases).
 
 ### Run
 
