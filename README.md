@@ -53,7 +53,8 @@ sonic-span/
 │   └── span-transport/         # Network delivery (Tokio-based)
 │       └── src/
 │           ├── udp.rs          # Low-latency UDP transport
-│           └── webrtc.rs       # WebRTC data channels
+│           ├── websocket.rs    # WebSocket broadcast for browser clients
+│           └── webrtc.rs       # WebRTC data channels (Phase 3)
 ├── targets/
 │   ├── desktop-node/           # PC transmitter/receiver CLI
 │   │   └── src/main.rs
@@ -62,7 +63,8 @@ sonic-span/
 │       ├── pkg/                # Compiled WASM output
 │       └── web/
 │           ├── index.html
-│           └── app.js
+│           ├── app.js
+│           └── worklet.js      # AudioWorklet processor (Web Audio)
 └── .github/workflows/          # CI/CD (Rust + WASM builds)
 ```
 
@@ -88,10 +90,18 @@ sonic-span/
 ### Phase 2: WebAssembly Integration & Cross-Device Playback
 *Allow any device with a modern browser to act as a receiver without installing native apps.*
 
-- [ ] Develop `wasm-client` target utilizing `wasm-bindgen`
-- [ ] Bridge WASM output to the JavaScript Web Audio API (`AudioWorklet`)
-- [ ] Implement WebSockets or WebRTC Data Channels in `span-transport` for browser compatibility
-- [ ] Successfully stream audio from the desktop node to a tablet browser
+- [√] Develop `wasm-client` target utilizing `wasm-bindgen`
+- [√] Bridge WASM output to the JavaScript Web Audio API (`AudioWorklet`)
+- [√] Implement WebSockets or WebRTC Data Channels in `span-transport` for browser compatibility
+- [√] Successfully stream audio from the desktop node to a tablet browser
+
+> **Phase 2 notes:** Browsers cannot open raw UDP sockets, so the desktop node
+> broadcasts the same PCM datagrams over WebSockets (`span-transport`'s
+> `WebSocketServer`). The WASM client decodes each datagram and hands the
+> interleaved `f32` samples to an `AudioWorklet` processor, which de-interleaves
+> them into the Web Audio graph. Run `desktop-node serve` to host the browser
+> client and stream audio in one command; the page defaults to connecting back
+> to the host it was served from.
 
 ### Phase 3: High-Fidelity & Low-Latency Optimization
 *Make the stream usable for real-time media consumption (videos/gaming).*
@@ -128,7 +138,7 @@ cargo build --release
 
 # Build WASM client
 cd targets/wasm-client
-wasm-pack build --target web
+wasm-pack build --target web --out-dir web/pkg
 ```
 
 ### Run
@@ -142,7 +152,18 @@ cargo run --bin desktop-node -- transmit --target 192.168.1.100 --device 0
 
 # Start receiver
 cargo run --bin desktop-node -- receive --bind 0.0.0.0:9000
+
+# Serve the browser client and stream audio to it (open http://<pc-ip>:8080
+# from any device with a browser)
+cargo run --bin desktop-node -- serve
+
+# Or broadcast to browsers over WebSockets without hosting the page
+cargo run --bin desktop-node -- transmit --transport websocket --bind 0.0.0.0:9000
 ```
+
+For browser playback, point the page at the desktop node with
+`ws://<pc-ip>:8080/ws` (or leave the server field blank when the page is
+served by `desktop-node serve`).
 
 ---
 
@@ -152,7 +173,7 @@ cargo run --bin desktop-node -- receive --bind 0.0.0.0:9000
 |-------|-------------|------------------|
 | `span-core` | Traits, ring buffer, Opus codec abstractions | `tokio`, `opus` |
 | `span-capture` | System audio loopback capture | `cpal` |
-| `span-transport` | UDP + WebRTC network layer | `tokio`, `quinn` |
+| `span-transport` | UDP + WebSocket network layer | `tokio`, `tokio-tungstenite` |
 | `desktop-node` | CLI transmitter/receiver | `clap`, `anyhow` |
 | `wasm-client` | Browser-based receiver | `wasm-bindgen`, `web-sys` |
 
