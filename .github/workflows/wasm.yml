@@ -1,0 +1,30 @@
+name: WASM Client
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build:
+    name: Build WASM client
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: jetli/wasm-pack-action@v0.4.0
+        with:
+          version: "latest"
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: targets/wasm-client -> target
+      - name: Build
+        working-directory: targets/wasm-client
+        run: wasm-pack build --target web --out-dir web/pkg
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: wasm-client-pkg
+          path: targets/wasm-client/web/pkg
