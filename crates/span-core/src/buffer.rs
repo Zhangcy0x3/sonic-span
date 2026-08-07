@@ -56,7 +56,7 @@ impl AudioRingBuffer {
         let capacity = capacity_frames.next_power_of_two();
         Self {
             buffer: UnsafeCell::new(vec![0.0; capacity]),
-            capacity: capacity,
+            capacity,
             w: CachePadded(AtomicUsize::new(0)),
             r: CachePadded(AtomicUsize::new(0)),
         }

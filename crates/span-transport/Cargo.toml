@@ -4,4 +4,10 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+async-trait = "0.1"
 span-core = { path = "../span-core" }
+thiserror = "2"
+tokio = { version = "1", features = ["net", "rt", "time"] }
+
+[dev-dependencies]
+tokio = { version = "1", features = ["macros", "rt"] }

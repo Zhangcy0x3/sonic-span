@@ -5,3 +5,5 @@ edition = "2021"
 
 [dependencies]
 span-core = { path = "../span-core" }
+cpal = "0.15"
+thiserror = "2"

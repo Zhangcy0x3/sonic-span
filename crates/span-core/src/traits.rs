@@ -1,5 +1,6 @@
 use crate::errors::{AudioError, NetworkError};
 
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AudioConfig {
     pub sample_rate: u32,
     pub channels: u16,

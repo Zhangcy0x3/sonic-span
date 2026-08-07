@@ -75,9 +75,15 @@ sonic-span/
 
 - [√] Initialize Cargo workspace and define `AudioSource`, `AudioSink`, and `NetworkTransport` traits
 - [√] Implement a lock-free ring buffer in `span-core` for thread-safe cross-boundary data handoffs
-- [ ] Implement local system audio loopback capture using `cpal` (Windows/macOS/Linux)
-- [ ] Build a rudimentary UDP transport layer using asynchronous I/O (`tokio`)
-- [ ] Create a basic CLI transmitter (PC) and CLI receiver (PC) to verify end-to-end transmission
+- [√] Implement local system audio loopback capture using `cpal` (Windows/macOS/Linux)
+- [√] Build a rudimentary UDP transport layer using asynchronous I/O (`tokio`)
+- [√] Create a basic CLI transmitter (PC) and CLI receiver (PC) to verify end-to-end transmission
+
+> **Phase 1 notes:** Audio crosses the network as uncompressed little-endian
+> `f32` PCM in UDP datagrams (19-byte header: magic, version, sequence number,
+> sample rate, channel count, payload length — see `span-transport/src/protocol.rs`).
+> On Windows use a loopback-capable capture device (e.g. "Stereo Mix"), on macOS
+> install BlackHole, and on Linux use a PulseAudio "Monitor of ..." device.
 
 ### Phase 2: WebAssembly Integration & Cross-Device Playback
 *Allow any device with a modern browser to act as a receiver without installing native apps.*
