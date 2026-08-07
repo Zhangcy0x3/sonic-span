@@ -7,6 +7,11 @@ on:
 permissions:
   contents: write
 
+env:
+  # audiopus_sys bundles an Opus CMakeLists.txt that declares cmake_minimum_required(VERSION 3.1);
+  # CMake 4.x refuses policies below 3.5 unless this compatibility floor is set.
+  CMAKE_POLICY_VERSION_MINIMUM: "3.5"
+
 jobs:
   release:
     name: Build packages and publish release
