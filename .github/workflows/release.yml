@@ -43,16 +43,31 @@ jobs:
         with:
           files: dist/*
           body_path: RELEASE_NOTES.md
+          overwrite: true
 
   windows:
     name: Build Windows package
+    needs: release
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
 
+      - name: Install ninja
+        run: choco install ninja -y --no-progress
+
       - name: Build desktop-node (release)
-        run: cargo build --release --bin desktop-node
+        shell: pwsh
+        run: |
+          cargo build --release --bin desktop-node 2>&1 | Tee-Object -FilePath build.log
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Upload build log
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-build-log
+          path: build.log
 
       - name: Package release artifact
         shell: pwsh
@@ -66,9 +81,11 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: dist/*
+          overwrite: true
 
   android:
     name: Build Android APK
+    needs: release
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -110,3 +127,4 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: dist/*
+          overwrite: true
