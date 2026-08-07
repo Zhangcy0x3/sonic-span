@@ -136,4 +136,15 @@ impl AudioRingBuffer {
         self.r.store(r.wrapping_add(to_read), Ordering::Release);
         to_read
     }
+
+    /// Number of frames currently available to read.
+    pub fn len(&self) -> usize {
+        self.w
+            .load(Ordering::Relaxed)
+            .wrapping_sub(self.r.load(Ordering::Relaxed))
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
 }

@@ -3,7 +3,11 @@ name = "span-core"
 version = "0.1.0"
 edition = "2021"
 
+[features]
+opus = ["dep:opus"]
+
 [dependencies]
 async-trait = "0.1.89"
 thiserror = "2.0.18"
 tokio = "1.52.3"
+opus = { version = "0.3", optional = true }
