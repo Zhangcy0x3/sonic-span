@@ -78,7 +78,14 @@ jobs:
       - name: Build desktop-node (release)
         shell: pwsh
         run: |
-          cargo build --release --bin desktop-node 2>&1 | Tee-Object -FilePath build.log
+          $attempt = 0
+          do {
+            $attempt++
+            cargo build --release --bin desktop-node 2>&1 | Tee-Object -FilePath build.log
+            if ($LASTEXITCODE -eq 0) { break }
+            Write-Host "cargo build attempt ${attempt} failed (exit $LASTEXITCODE), retrying..."
+            if ($attempt -lt 2) { Start-Sleep -Seconds 15 }
+          } while ($attempt -lt 2)
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Upload build log
@@ -92,9 +99,19 @@ jobs:
         if: failure()
         shell: pwsh
         run: |
-          $log = Get-Content build.log -Tail 80 -ErrorAction SilentlyContinue
+          $log = Get-Content build.log -Tail 120 -ErrorAction SilentlyContinue
           $msg = ($log -join "`n")
-          if ($msg) { Write-Output "::error title=Windows build failed::$msg" }
+          $free = (Get-PSDrive -Name C).Free
+          $msg += "`n---`nC: drive free bytes: $free"
+          $chunk = 3000
+          $i = 0
+          while ($i -lt $msg.Length) {
+            $len = [Math]::Min($chunk, $msg.Length - $i)
+            $part = $msg.Substring($i, $len)
+            $part = $part.Replace('%', '%25').Replace("`r", '%0D').Replace("`n", '%0A')
+            Write-Output "::error title=Windows build log (part $($i / $chunk + 1))::$part"
+            $i += $chunk
+          }
 
       - name: Package release artifact
         shell: pwsh
@@ -112,15 +129,7 @@ jobs:
           ls -la dist
           LOG=$(mktemp)
           set +e
-          for id in $(gh api "repos/$GITHUB_REPOSITORY/releases?per_page=100" --jq '.[] | select(.tag_name == "'"$GITHUB_REF_NAME"'" or .tag_name == "" or .tag_name == null) | .id'); do
-            gh api -X DELETE "repos/$GITHUB_REPOSITORY/releases/$id" >/dev/null 2>&1 || true
-          done
-          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
-            gh release edit "$GITHUB_REF_NAME"
-            gh release upload "$GITHUB_REF_NAME" dist/*.zip --clobber >>"$LOG" 2>&1
-          else
-            gh release create "$GITHUB_REF_NAME" dist/*.zip --title "SonicSpan $GITHUB_REF_NAME" --notes-file RELEASE_NOTES.md >>"$LOG" 2>&1
-          fi
+          gh release upload "$GITHUB_REF_NAME" dist/*.zip --clobber >>"$LOG" 2>&1
           RC=$?
           set -e
           if [ $RC -ne 0 ]; then
@@ -172,8 +181,7 @@ jobs:
       - name: Package release artifact
         run: |
           mkdir -p dist
-          cp android/app/build/outputs/apk/release/app-release-unsigned.apk "dist/sonicspan-android-${GITHUB_REF_NAME}.apk"
-        working-directory: targets/android-client
+          cp targets/android-client/android/app/build/outputs/apk/release/app-release-unsigned.apk "dist/sonicspan-android-${GITHUB_REF_NAME}.apk"
 
       - name: Publish GitHub release
         shell: bash
@@ -183,15 +191,7 @@ jobs:
           ls -la dist
           LOG=$(mktemp)
           set +e
-          for id in $(gh api "repos/$GITHUB_REPOSITORY/releases?per_page=100" --jq '.[] | select(.tag_name == "'"$GITHUB_REF_NAME"'" or .tag_name == "" or .tag_name == null) | .id'); do
-            gh api -X DELETE "repos/$GITHUB_REPOSITORY/releases/$id" >/dev/null 2>&1 || true
-          done
-          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
-            gh release edit "$GITHUB_REF_NAME"
-            gh release upload "$GITHUB_REF_NAME" dist/*.apk --clobber >>"$LOG" 2>&1
-          else
-            gh release create "$GITHUB_REF_NAME" dist/*.apk --title "SonicSpan $GITHUB_REF_NAME" --notes-file RELEASE_NOTES.md >>"$LOG" 2>&1
-          fi
+          gh release upload "$GITHUB_REF_NAME" dist/*.apk --clobber >>"$LOG" 2>&1
           RC=$?
           set -e
           if [ $RC -ne 0 ]; then
