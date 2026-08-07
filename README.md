@@ -45,7 +45,9 @@ sonic-span/
 ├── crates/
 │   ├── span-core/              # [I/O Agnostic] Ring buffers, state machines, traits
 │   │   └── src/
-│   │       ├── buffer.rs       # Lock-free ring buffer & jitter buffer
+│   │       ├── buffer.rs       # Lock-free ring buffer
+│   │       ├── jitter.rs       # Dynamic jitter buffer (reorder + loss)
+│   │       ├── resampler.rs    # Clock drift compensation (dynamic resampling)
 │   │       ├── codec.rs        # Opus encoding/decoding abstractions
 │   │       └── traits.rs       # AudioSource, AudioSink, NetworkTransport
 │   ├── span-capture/           # Native audio loopback capture
@@ -82,8 +84,9 @@ sonic-span/
 - [√] Create a basic CLI transmitter (PC) and CLI receiver (PC) to verify end-to-end transmission
 
 > **Phase 1 notes:** Audio crosses the network as uncompressed little-endian
-> `f32` PCM in UDP datagrams (19-byte header: magic, version, sequence number,
-> sample rate, channel count, payload length — see `span-transport/src/protocol.rs`).
+> `f32` PCM in UDP datagrams (20-byte header: magic, version, codec, sequence
+> number, sample rate, channel count, payload length — see
+> `span-transport/src/protocol.rs`).
 > On Windows use a loopback-capable capture device (e.g. "Stereo Mix"), on macOS
 > install BlackHole, and on Linux use a PulseAudio "Monitor of ..." device.
 
@@ -106,9 +109,18 @@ sonic-span/
 ### Phase 3: High-Fidelity & Low-Latency Optimization
 *Make the stream usable for real-time media consumption (videos/gaming).*
 
-- [ ] Integrate Opus codec into `span-core` for high-quality, low-bandwidth transmission
-- [ ] Implement a dynamic Jitter Buffer to handle network packet loss and out-of-order delivery
-- [ ] Develop a Clock Drift Compensation algorithm (dynamic resampling) to synchronize PC and tablet audio clocks
+- [√] Integrate Opus codec into `span-core` for high-quality, low-bandwidth transmission
+- [√] Implement a dynamic Jitter Buffer to handle network packet loss and out-of-order delivery
+- [√] Develop a Clock Drift Compensation algorithm (dynamic resampling) to synchronize PC and tablet audio clocks
+
+> **Phase 3 notes:** The wire protocol was bumped to v2 with a codec byte.
+> `desktop-node transmit --codec opus` sends one 20 ms Opus frame per packet
+> (Opus is bundled into the build — no system library needed). The native
+> receiver decodes Opus or PCM, reorders and loss-detects packets in a dynamic
+> jitter buffer whose target latency adapts to the network, and resamples with
+> a drift compensator that keeps the jitter buffer occupancy near its target
+> so the PC and tablet clocks stay in sync. Browser clients continue to receive
+> uncompressed PCM (the default), so `desktop-node serve` works unchanged.
 
 ### Phase 4: Ecosystem, Discovery, and Polish
 *Transform the library into a user-friendly application.*
@@ -153,6 +165,9 @@ cargo run --bin desktop-node -- transmit --target 192.168.1.100 --device 0
 # Start receiver
 cargo run --bin desktop-node -- receive --bind 0.0.0.0:9000
 
+# Same, but the transmitter compresses with Opus (browser clients stay on PCM)
+cargo run --bin desktop-node -- transmit --codec opus --target 192.168.1.100
+
 # Serve the browser client and stream audio to it (open http://<pc-ip>:8080
 # from any device with a browser)
 cargo run --bin desktop-node -- serve
@@ -171,7 +186,7 @@ served by `desktop-node serve`).
 
 | Crate | Description | Key Dependencies |
 |-------|-------------|------------------|
-| `span-core` | Traits, ring buffer, Opus codec abstractions | `tokio`, `opus` |
+| `span-core` | Traits, ring buffer, jitter buffer, Opus codec, resampler | `tokio`, `opus` |
 | `span-capture` | System audio loopback capture | `cpal` |
 | `span-transport` | UDP + WebSocket network layer | `tokio`, `tokio-tungstenite` |
 | `desktop-node` | CLI transmitter/receiver | `clap`, `anyhow` |
