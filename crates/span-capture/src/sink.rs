@@ -41,8 +41,7 @@ impl CpalSink {
         let device_name = device
             .name()
             .map_err(|e| CaptureError::DeviceQuery(e.to_string()))?;
-        let (stream_config, sample_format) =
-            choose_output_config(&device, sample_rate, channels)?;
+        let (stream_config, sample_format) = choose_output_config(&device, sample_rate, channels)?;
 
         Ok(Self {
             config: AudioConfig {

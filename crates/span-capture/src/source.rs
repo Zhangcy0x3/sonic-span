@@ -29,7 +29,10 @@ pub struct CpalLoopbackSource {
 
 impl CpalLoopbackSource {
     /// Open a capture device (by `list-devices` index, or the system default).
-    pub fn new(device_index: Option<usize>, buffer_capacity_frames: usize) -> Result<Self, CaptureError> {
+    pub fn new(
+        device_index: Option<usize>,
+        buffer_capacity_frames: usize,
+    ) -> Result<Self, CaptureError> {
         let device = select_input_device(device_index)?;
         let device_name = device
             .name()

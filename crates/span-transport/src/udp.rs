@@ -121,7 +121,9 @@ impl NetworkTransport for UdpTransport {
             .map_err(|e| NetworkError::ReceiveError(e.to_string()))?;
         buf.truncate(n);
         self.stats.packets_received.fetch_add(1, Ordering::Relaxed);
-        self.stats.bytes_received.fetch_add(n as u64, Ordering::Relaxed);
+        self.stats
+            .bytes_received
+            .fetch_add(n as u64, Ordering::Relaxed);
         Ok(buf)
     }
 

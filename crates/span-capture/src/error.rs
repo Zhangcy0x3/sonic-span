@@ -3,10 +3,14 @@ use thiserror::Error;
 /// Errors produced while enumerating devices or managing cpal streams.
 #[derive(Debug, Error)]
 pub enum CaptureError {
-    #[error("no default audio input device available; run `list-devices` and pass --device <index>")]
+    #[error(
+        "no default audio input device available; run `list-devices` and pass --device <index>"
+    )]
     NoDefaultInput,
 
-    #[error("no default audio output device available; run `list-devices` and pass --device <index>")]
+    #[error(
+        "no default audio output device available; run `list-devices` and pass --device <index>"
+    )]
     NoDefaultOutput,
 
     #[error("audio device #{index} not found; run `list-devices` to see available devices")]
