@@ -69,6 +69,14 @@ jobs:
           name: windows-build-log
           path: build.log
 
+      - name: Report build failure
+        if: failure()
+        shell: pwsh
+        run: |
+          $log = Get-Content build.log -Tail 80 -ErrorAction SilentlyContinue
+          $msg = ($log -join "`n")
+          if ($msg) { Write-Output "::error title=Windows build failed::$msg" }
+
       - name: Package release artifact
         shell: pwsh
         run: |
