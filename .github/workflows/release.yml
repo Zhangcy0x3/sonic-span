@@ -39,11 +39,16 @@ jobs:
           (cd targets/wasm-client/web && zip -qr "../../../dist/sonicspan-web-client-${GITHUB_REF_NAME}.zip" .)
 
       - name: Publish GitHub release
-        uses: softprops/action-gh-release@v2
-        with:
-          files: dist/*
-          body_path: RELEASE_NOTES.md
-          overwrite: true
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release edit "$GITHUB_REF_NAME" --notes-file RELEASE_NOTES.md
+            gh release upload "$GITHUB_REF_NAME" dist/* --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" dist/* --title "SonicSpan $GITHUB_REF_NAME" --notes-file RELEASE_NOTES.md
+          fi
 
   windows:
     name: Build Windows package
@@ -86,10 +91,16 @@ jobs:
           Compress-Archive -Path dist/stage/* -DestinationPath "dist/sonicspan-desktop-node-$env:GITHUB_REF_NAME-windows-x86_64.zip"
 
       - name: Publish GitHub release
-        uses: softprops/action-gh-release@v2
-        with:
-          files: dist/*
-          overwrite: true
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release edit "$GITHUB_REF_NAME"
+            gh release upload "$GITHUB_REF_NAME" dist/* --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" dist/* --title "SonicSpan $GITHUB_REF_NAME" --notes-file RELEASE_NOTES.md
+          fi
 
   android:
     name: Build Android APK
@@ -123,7 +134,13 @@ jobs:
 
       - name: Build release APK
         working-directory: targets/android-client/android
-        run: ./gradlew assembleRelease
+        run: |
+          for i in 1 2 3; do
+            ./gradlew assembleRelease --stacktrace && exit 0
+            echo "gradle attempt $i failed, retrying"
+            sleep 10
+          done
+          exit 1
 
       - name: Package release artifact
         run: |
@@ -132,7 +149,13 @@ jobs:
         working-directory: targets/android-client
 
       - name: Publish GitHub release
-        uses: softprops/action-gh-release@v2
-        with:
-          files: dist/*
-          overwrite: true
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release edit "$GITHUB_REF_NAME"
+            gh release upload "$GITHUB_REF_NAME" dist/* --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" dist/* --title "SonicSpan $GITHUB_REF_NAME" --notes-file RELEASE_NOTES.md
+          fi
