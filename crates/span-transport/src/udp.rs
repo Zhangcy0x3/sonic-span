@@ -128,7 +128,8 @@ impl NetworkTransport for UdpTransport {
     }
 
     fn get_stats(&self) -> NetworkStats {
-        // Latency and loss measurement arrive with the jitter buffer in Phase 3.
+        // Latency and loss are measured by the jitter buffer at the receiver
+        // (see `span-core::jitter`); this returns transport-level placeholders.
         NetworkStats {
             latency_ms: 0,
             packet_loss_rate: 0.0,

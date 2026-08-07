@@ -22,7 +22,7 @@ use tokio::time::sleep;
 #[command(
     name = "desktop-node",
     version,
-    about = "SonicSpan desktop node: capture system audio and stream it over UDP",
+    about = "SonicSpan desktop node: capture system audio and stream it over UDP or WebSockets",
     long_about = None
 )]
 struct Cli {
@@ -34,7 +34,7 @@ struct Cli {
 enum Command {
     /// List available audio capture and playback devices
     ListDevices,
-    /// Capture system audio and stream it as UDP PCM packets
+    /// Capture system audio and stream it as PCM or Opus packets
     Transmit {
         /// Destination address: IP or hostname, optionally with port (default 9000)
         #[arg(long, default_value = "127.0.0.1")]
