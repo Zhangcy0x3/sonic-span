@@ -3,11 +3,18 @@ name = "span-transport"
 version = "0.1.0"
 edition = "2021"
 
+[features]
+default = ["udp", "websocket"]
+udp = ["dep:tokio"]
+websocket = ["dep:tokio", "dep:futures-util", "dep:tokio-tungstenite"]
+
 [dependencies]
 async-trait = "0.1"
 span-core = { path = "../span-core" }
 thiserror = "2"
-tokio = { version = "1", features = ["net", "rt", "time"] }
+tokio = { version = "1", features = ["net", "rt", "sync", "time"], optional = true }
+futures-util = { version = "0.3", optional = true }
+tokio-tungstenite = { version = "0.24", default-features = false, features = ["connect", "handshake"], optional = true }
 
 [dev-dependencies]
 tokio = { version = "1", features = ["macros", "rt"] }
