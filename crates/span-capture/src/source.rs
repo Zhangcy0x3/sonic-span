@@ -42,7 +42,7 @@ impl CpalLoopbackSource {
             .map_err(|e| CaptureError::DeviceQuery(e.to_string()))?;
         let config = AudioConfig {
             sample_rate: supported_config.sample_rate().0,
-            channels: supported_config.channels() as u16,
+            channels: supported_config.channels(),
         };
         Ok(Self {
             device,
