@@ -59,6 +59,9 @@ sonic-span/
 ├── targets/
 │   ├── desktop-node/           # PC transmitter/receiver CLI
 │   │   └── src/main.rs
+│   ├── android-client/         # Native Android receiver
+│   │   ├── src/                # JNI entry points, receiver pipeline
+│   │   └── android/            # Gradle app (Kotlin + AudioTrack)
 │   └── wasm-client/            # Tablet/browser receiver
 │       ├── src/lib.rs          # WASM bindings → AudioSink
 │       └── web/
@@ -182,6 +185,26 @@ For browser playback, point the page at the desktop node with
 `ws://<pc-ip>:8080/ws` (or leave the server field blank when the page is
 served by `desktop-node serve`).
 
+### Android receiver
+
+The native Android app (`targets/android-client`) receives the UDP stream
+directly (PCM or Opus) and plays it through `AudioTrack`.
+
+```bash
+# Build the Rust library for Android (requires Android NDK + cargo-ndk)
+cd targets/android-client
+cargo ndk -t arm64-v8a -t armeabi-v7a -t x86_64 -o android/app/src/main/jniLibs build --release
+
+# Build the APK (requires Android SDK)
+cd android
+./gradlew assembleDebug
+```
+
+Install `app/build/outputs/apk/debug/app-debug.apk` on the device, run
+`desktop-node transmit --target <pc-ip> --codec opus` on the PC, and enter
+`<pc-ip>` / `9000` in the app. The CI workflow builds the APK automatically
+on every push to `main`.
+
 ---
 
 ## 🧩 Crate Overview
@@ -193,6 +216,7 @@ served by `desktop-node serve`).
 | `span-transport` | UDP + WebSocket network layer | `tokio`, `tokio-tungstenite` |
 | `desktop-node` | CLI transmitter/receiver | `clap`, `anyhow` |
 | `wasm-client` | Browser-based receiver | `wasm-bindgen`, `web-sys` |
+| `android-client` | Native Android receiver | `jni`, `tokio` |
 
 ---
 
