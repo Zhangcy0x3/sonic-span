@@ -46,6 +46,10 @@ jobs:
           ls -la dist
           LOG=$(mktemp)
           set +e
+          # Delete stale releases left behind when the tag was re-created.
+          for id in $(gh api "repos/$GITHUB_REPOSITORY/releases?per_page=100" --jq '.[] | select(.tag_name == "'"$GITHUB_REF_NAME"'" or .tag_name == "" or .tag_name == null) | .id'); do
+            gh api -X DELETE "repos/$GITHUB_REPOSITORY/releases/$id" >/dev/null 2>&1 || true
+          done
           if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
             gh release edit "$GITHUB_REF_NAME" --notes-file RELEASE_NOTES.md >>"$LOG" 2>&1
             gh release upload "$GITHUB_REF_NAME" dist/* --clobber >>"$LOG" 2>&1
@@ -108,6 +112,9 @@ jobs:
           ls -la dist
           LOG=$(mktemp)
           set +e
+          for id in $(gh api "repos/$GITHUB_REPOSITORY/releases?per_page=100" --jq '.[] | select(.tag_name == "'"$GITHUB_REF_NAME"'" or .tag_name == "" or .tag_name == null) | .id'); do
+            gh api -X DELETE "repos/$GITHUB_REPOSITORY/releases/$id" >/dev/null 2>&1 || true
+          done
           if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
             gh release edit "$GITHUB_REF_NAME"
             gh release upload "$GITHUB_REF_NAME" dist/* --clobber >>"$LOG" 2>&1
@@ -176,6 +183,9 @@ jobs:
           ls -la dist
           LOG=$(mktemp)
           set +e
+          for id in $(gh api "repos/$GITHUB_REPOSITORY/releases?per_page=100" --jq '.[] | select(.tag_name == "'"$GITHUB_REF_NAME"'" or .tag_name == "" or .tag_name == null) | .id'); do
+            gh api -X DELETE "repos/$GITHUB_REPOSITORY/releases/$id" >/dev/null 2>&1 || true
+          done
           if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
             gh release edit "$GITHUB_REF_NAME"
             gh release upload "$GITHUB_REF_NAME" dist/* --clobber >>"$LOG" 2>&1
