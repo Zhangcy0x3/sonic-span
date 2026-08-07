@@ -1,0 +1,45 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build packages and publish release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Install ALSA development files
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev pkg-config
+
+      - name: Build desktop-node (release)
+        run: cargo build --release --bin desktop-node
+
+      - name: Install wasm-pack
+        uses: jetli/wasm-pack-action@v0.4.0
+        with:
+          version: "latest"
+
+      - name: Build web client
+        working-directory: targets/wasm-client
+        run: wasm-pack build --target web --out-dir web/pkg
+
+      - name: Package release artifacts
+        run: |
+          mkdir -p dist/stage
+          cp target/release/desktop-node dist/stage/
+          cp LICENSE README.md dist/stage/
+          tar -czf "dist/sonicspan-desktop-node-${GITHUB_REF_NAME}-x86_64-unknown-linux-gnu.tar.gz" -C dist/stage .
+          (cd targets/wasm-client/web && zip -qr "../../../dist/sonicspan-web-client-${GITHUB_REF_NAME}.zip" .)
+
+      - name: Publish GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          body_path: RELEASE_NOTES.md
