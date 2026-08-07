@@ -43,3 +43,70 @@ jobs:
         with:
           files: dist/*
           body_path: RELEASE_NOTES.md
+
+  windows:
+    name: Build Windows package
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Build desktop-node (release)
+        run: cargo build --release --bin desktop-node
+
+      - name: Package release artifact
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force dist/stage | Out-Null
+          Copy-Item target/release/desktop-node.exe dist/stage/
+          Copy-Item LICENSE, README.md dist/stage/
+          Compress-Archive -Path dist/stage/* -DestinationPath "dist/sonicspan-desktop-node-$env:GITHUB_REF_NAME-windows-x86_64.zip"
+
+      - name: Publish GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+
+  android:
+    name: Build Android APK
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: android-actions/setup-android@v3
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android, armv7-linux-androideabi, x86_64-linux-android
+
+      - name: Install NDK
+        run: sdkmanager "ndk;27.0.12077973" && yes | sdkmanager --licenses > /dev/null
+
+      - name: Install cargo-ndk
+        run: cargo install cargo-ndk --locked
+
+      - name: Build Rust library for Android
+        working-directory: targets/android-client
+        run: |
+          export ANDROID_NDK_HOME="$ANDROID_SDK_ROOT/ndk/27.0.12077973"
+          cargo ndk -t arm64-v8a -t armeabi-v7a -t x86_64 -o android/app/src/main/jniLibs build --release
+
+      - name: Build release APK
+        working-directory: targets/android-client/android
+        run: ./gradlew assembleRelease
+
+      - name: Package release artifact
+        run: |
+          mkdir -p dist
+          cp android/app/build/outputs/apk/release/app-release-unsigned.apk "dist/sonicspan-android-${GITHUB_REF_NAME}.apk"
+        working-directory: targets/android-client
+
+      - name: Publish GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
