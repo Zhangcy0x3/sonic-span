@@ -1,4 +1,4 @@
-# SonicSpan v1.0.0
+# SonicSpan v1.1.0
 
 Cross-platform, low-latency audio streaming from a desktop PC to any device
 with a browser — or to another desktop. Phase 4 (mDNS discovery, system-tray
@@ -7,8 +7,10 @@ feature-complete release.
 
 ## What's included
 
-- **desktop-node** — Linux x86_64 prebuilt binary with `transmit`, `receive`,
-  `list-devices`, and `serve` commands
+- **desktop-node** — Linux x86_64 and Windows x86_64 prebuilt binaries with
+  `transmit`, `receive`, `list-devices`, and `serve` commands
+- **Android app** — APK that receives desktop audio or transmits the phone's
+  microphone to a desktop `receive` node
 - **web client** — ready-to-serve browser receiver (served automatically by
   `desktop-node serve`, or by any static file server)
 
@@ -21,6 +23,8 @@ feature-complete release.
 - **Phase 3** — bundled Opus codec (no system library needed), dynamic jitter
   buffer (reordering, loss detection, adaptive latency), clock-drift
   compensation via dynamic resampling, protocol v2 with codec byte
+- **Android client** — native receiver (AudioTrack playback) and transmitter
+  (microphone capture through AudioRecord, Opus-compressed UDP)
 
 ## Quick start
 
@@ -34,5 +38,12 @@ feature-complete release.
 ./desktop-node receive
 ```
 
-Windows and macOS binaries are not prebuilt — build from source per the
-instructions in `README.md`.
+## Packages
+
+- `sonicspan-desktop-node-v1.1.0-x86_64-unknown-linux-gnu.tar.gz`
+- `sonicspan-desktop-node-v1.1.0-windows-x86_64.zip`
+- `sonicspan-android-v1.1.0.apk` (unsigned — enable "install unknown apps")
+- `sonicspan-web-client-v1.1.0.zip`
+
+macOS binaries are not prebuilt — build from source per the instructions in
+`README.md`.

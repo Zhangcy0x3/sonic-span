@@ -185,10 +185,11 @@ For browser playback, point the page at the desktop node with
 `ws://<pc-ip>:8080/ws` (or leave the server field blank when the page is
 served by `desktop-node serve`).
 
-### Android receiver
+### Android app
 
-The native Android app (`targets/android-client`) receives the UDP stream
-directly (PCM or Opus) and plays it through `AudioTrack`.
+The native Android app (`targets/android-client`) can **receive** a UDP stream
+(PCM or Opus, played through `AudioTrack`) or **transmit** the device's
+microphone (48 kHz mono, Opus-compressed) to a desktop `receive` node.
 
 ```bash
 # Build the Rust library for Android (requires Android NDK + cargo-ndk)
@@ -202,8 +203,9 @@ cd android
 
 Install `app/build/outputs/apk/debug/app-debug.apk` on the device, run
 `desktop-node transmit --target <pc-ip> --codec opus` on the PC, and enter
-`<pc-ip>` / `9000` in the app. The CI workflow builds the APK automatically
-on every push to `main`.
+`<pc-ip>` / `9000` in the app with mode **Receive audio** — or switch to
+**Transmit microphone** and run `desktop-node receive` on the PC to hear the
+phone. The CI workflow builds the APK automatically on every push to `main`.
 
 ---
 
