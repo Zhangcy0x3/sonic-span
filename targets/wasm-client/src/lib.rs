@@ -161,6 +161,13 @@ fn handle_message(event: MessageEvent) {
             return;
         }
     };
+    let samples = match packet.samples() {
+        Some(samples) => samples,
+        None => {
+            emit_status("received an Opus packet; the browser client only supports PCM");
+            return;
+        }
+    };
 
     let (needs_rebuild, worklet_url, sample_rate, channels) = PLAYER.with(|player| {
         let mut player = player.borrow_mut();
@@ -182,7 +189,7 @@ fn handle_message(event: MessageEvent) {
             // of the stream.
             let cap = packet.sample_rate as usize * packet.channels as usize * 2;
             if player.pending.len() < cap {
-                player.pending.extend_from_slice(&packet.samples);
+                player.pending.extend_from_slice(&samples);
             }
             (
                 true,
@@ -205,7 +212,7 @@ fn handle_message(event: MessageEvent) {
     PLAYER.with(|player| {
         if let Some(player) = player.borrow().as_ref() {
             if let Some(node) = player.worklet.as_ref() {
-                post_samples(node, &packet.samples, packet.channels);
+                post_samples(node, &samples, packet.channels);
             }
         }
     });

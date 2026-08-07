@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-span-core = { path = "../../crates/span-core" }
+span-core = { path = "../../crates/span-core", features = ["opus"] }
 span-capture = { path = "../../crates/span-capture" }
 span-transport = { path = "../../crates/span-transport" }
 anyhow = "1"

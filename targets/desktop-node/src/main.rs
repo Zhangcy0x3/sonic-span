@@ -7,8 +7,11 @@ use clap::{Parser, Subcommand, ValueEnum};
 use span_capture::device::{list_input_devices, list_output_devices};
 use span_capture::sink::CpalSink;
 use span_capture::source::{CpalLoopbackSource, DEFAULT_BUFFER_CAPACITY_FRAMES};
+use span_core::codec::{opus_frame_size, OpusDecoder, OpusEncoder};
+use span_core::jitter::{JitterBuffer, JitterBufferConfig};
+use span_core::resampler::DriftCompensator;
 use span_core::traits::{AudioSink, AudioSource, NetworkTransport};
-use span_transport::protocol::{PcmPacket, HEADER_SIZE, MAX_PAYLOAD_BYTES};
+use span_transport::protocol::{Codec, PcmPacket, HEADER_SIZE, MAX_PAYLOAD_BYTES};
 use span_transport::udp::UdpTransport;
 use span_transport::websocket::WebSocketServer;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -46,6 +49,10 @@ enum Command {
         /// for browser clients
         #[arg(long, value_enum, default_value_t = Transport::Udp)]
         transport: Transport,
+        /// Payload codec: `pcm` (browser-compatible) or `opus` (compressed,
+        /// for native desktop receivers)
+        #[arg(long, value_enum, default_value_t = TransmitCodec::Pcm)]
+        codec: TransmitCodec,
         /// Bind address for the WebSocket listener
         #[arg(long, default_value = "0.0.0.0:9000")]
         bind: String,
@@ -83,6 +90,21 @@ enum Transport {
     WebSocket,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum)]
+enum TransmitCodec {
+    Pcm,
+    Opus,
+}
+
+impl From<TransmitCodec> for Codec {
+    fn from(value: TransmitCodec) -> Self {
+        match value {
+            TransmitCodec::Pcm => Codec::Pcm,
+            TransmitCodec::Opus => Codec::Opus,
+        }
+    }
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     let cli = Cli::parse();
@@ -93,8 +115,9 @@ async fn main() -> Result<()> {
             device,
             packet_frames,
             transport,
+            codec,
             bind,
-        } => run_transmit(&target, device, packet_frames, transport, &bind).await,
+        } => run_transmit(&target, device, packet_frames, transport, codec, &bind).await,
         Command::Receive { bind, device } => run_receive(&bind, device).await,
         Command::Serve {
             bind,
@@ -150,6 +173,7 @@ async fn run_transmit(
     device: Option<usize>,
     packet_frames: usize,
     transport: Transport,
+    codec: TransmitCodec,
     bind: &str,
 ) -> Result<()> {
     match transport {
@@ -157,7 +181,13 @@ async fn run_transmit(
             let peer = resolve_target(target).await?;
             let transport = UdpTransport::connect(peer).await?;
             println!("Streaming uncompressed PCM over UDP to {peer} (Ctrl+C to stop)");
-            run_capture_loop(device, packet_frames, StreamSink::Udp(transport)).await
+            run_capture_loop(
+                device,
+                packet_frames,
+                codec.into(),
+                StreamSink::Udp(transport),
+            )
+            .await
         }
         Transport::WebSocket => {
             let addr: SocketAddr = bind
@@ -173,7 +203,13 @@ async fn run_transmit(
                     eprintln!("[desktop-node] websocket accept loop failed: {e}");
                 }
             });
-            run_capture_loop(device, packet_frames, StreamSink::WebSocket(server)).await
+            run_capture_loop(
+                device,
+                packet_frames,
+                codec.into(),
+                StreamSink::WebSocket(server),
+            )
+            .await
         }
     }
 }
@@ -204,21 +240,34 @@ impl StreamSink {
 async fn run_capture_loop(
     device: Option<usize>,
     packet_frames: usize,
+    codec: Codec,
     mut sink: StreamSink,
 ) -> Result<()> {
-    let payload_bytes = packet_frames * 4;
-    if payload_bytes > MAX_PAYLOAD_BYTES {
-        bail!(
-            "--packet-frames {packet_frames} would produce a {payload_bytes}-byte payload; \
-             keep it at or below {}",
-            MAX_PAYLOAD_BYTES / 4
-        );
-    }
-
     let mut source =
         CpalLoopbackSource::new(device, DEFAULT_BUFFER_CAPACITY_FRAMES).map_err(|e| anyhow!(e))?;
     source.start().context("failed to start audio capture")?;
     let cfg = source.config();
+
+    // Opus packets are always one 20 ms frame, so the per-packet frame count
+    // is derived from the sample rate rather than `--packet-frames`.
+    let frames_per_packet = match codec {
+        Codec::Pcm => {
+            let payload_bytes = packet_frames * 4;
+            if payload_bytes > MAX_PAYLOAD_BYTES {
+                bail!(
+                    "--packet-frames {packet_frames} would produce a {payload_bytes}-byte payload; \
+                     keep it at or below {}",
+                    MAX_PAYLOAD_BYTES / 4
+                );
+            }
+            packet_frames
+        }
+        Codec::Opus => opus_frame_size(cfg.sample_rate),
+    };
+    let mut encoder = (codec == Codec::Opus)
+        .then(|| OpusEncoder::new(cfg.sample_rate, cfg.channels))
+        .transpose()
+        .map_err(|e| anyhow!(e))?;
 
     println!(
         "Capturing {} Hz / {} ch from '{}'",
@@ -227,11 +276,17 @@ async fn run_capture_loop(
         source.device_name()
     );
     println!(
-        "Streaming uncompressed PCM over {} ({packet_frames} frames per packet) — Ctrl+C to stop",
-        sink.label()
+        "Streaming {} over {} ({} frames per packet) — Ctrl+C to stop",
+        match codec {
+            Codec::Pcm => "uncompressed PCM",
+            Codec::Opus => "Opus-compressed PCM",
+        },
+        sink.label(),
+        frames_per_packet
     );
 
-    let mut chunk = vec![0.0f32; packet_frames];
+    let mut chunk = vec![0.0f32; frames_per_packet];
+    let mut opus_pending: Vec<f32> = Vec::new();
     let mut sequence = 0u32;
     let mut sent_packets = 0u64;
     let mut sent_bytes = 0usize;
@@ -244,11 +299,23 @@ async fn run_capture_loop(
             continue;
         }
 
-        let packet = PcmPacket {
-            sequence,
-            sample_rate: cfg.sample_rate,
-            channels: cfg.channels,
-            samples: chunk[..n].to_vec(),
+        let pcm = &chunk[..n];
+        let packet = match codec {
+            Codec::Pcm => PcmPacket::from_pcm(sequence, cfg.sample_rate, cfg.channels, pcm),
+            Codec::Opus => {
+                opus_pending.extend_from_slice(pcm);
+                let frame_samples = frames_per_packet * cfg.channels as usize;
+                if opus_pending.len() < frame_samples {
+                    continue; // wait for a full 20 ms frame
+                }
+                let frame: Vec<f32> = opus_pending.drain(..frame_samples).collect();
+                let payload = encoder
+                    .as_mut()
+                    .unwrap()
+                    .encode(&frame)
+                    .map_err(|e| anyhow!(e))?;
+                PcmPacket::from_opus(sequence, cfg.sample_rate, cfg.channels, payload)
+            }
         };
         sequence = sequence.wrapping_add(1);
 
@@ -271,12 +338,16 @@ async fn run_receive(bind: &str, device: Option<usize>) -> Result<()> {
         .context("invalid --bind address; expected IP:port (e.g. 0.0.0.0:9000)")?;
     let mut transport = UdpTransport::bind(addr).await?;
     println!(
-        "Listening for UDP PCM on {} — Ctrl+C to stop",
+        "Listening for UDP audio on {} — Ctrl+C to stop",
         transport.local_addr()?
     );
 
     let mut sink: Option<CpalSink> = None;
+    let mut decoder: Option<OpusDecoder> = None;
+    let mut jitter: Option<JitterBuffer> = None;
+    let mut resampler: Option<DriftCompensator> = None;
     let mut sink_config: Option<(u32, u16)> = None;
+    let mut read_buf = vec![0.0f32; 2048];
     let mut received_packets = 0u64;
 
     loop {
@@ -294,24 +365,68 @@ async fn run_receive(bind: &str, device: Option<usize>) -> Result<()> {
             let mut new_sink = CpalSink::new(device, packet.sample_rate, packet.channels)
                 .map_err(|e| anyhow!(e))?;
             new_sink.start().context("failed to start audio output")?;
+            let sink_cfg = new_sink.config();
             println!(
                 "Receiving {} Hz / {} ch on '{}'",
-                new_sink.config().sample_rate,
-                new_sink.config().channels,
+                sink_cfg.sample_rate,
+                sink_cfg.channels,
                 new_sink.device_name()
             );
+            if sink_cfg.sample_rate != packet.sample_rate {
+                println!(
+                    "Resampling {} Hz stream to {} Hz output",
+                    packet.sample_rate, sink_cfg.sample_rate
+                );
+            }
             sink = Some(new_sink);
+            decoder = (packet.codec == Codec::Opus)
+                .then(|| OpusDecoder::new(packet.sample_rate, packet.channels))
+                .transpose()
+                .map_err(|e| anyhow!(e))?;
+            jitter = Some(JitterBuffer::new(JitterBufferConfig::new(
+                packet.sample_rate,
+                packet.channels,
+            )));
+            resampler = Some(DriftCompensator::new(
+                packet.sample_rate,
+                sink_cfg.sample_rate,
+            ));
             sink_config = Some(cfg);
         }
 
-        if let Some(sink) = sink.as_mut() {
-            sink.write_frames(&packet.samples).map_err(|e| anyhow!(e))?;
+        // Codec → interleaved f32 frames.
+        let samples = match packet.codec {
+            Codec::Pcm => packet.samples().unwrap_or_default(),
+            Codec::Opus => decoder
+                .as_mut()
+                .unwrap()
+                .decode(&packet.payload)
+                .map_err(|e| anyhow!(e))?,
+        };
+        let jitter = jitter.as_mut().unwrap();
+        jitter.push(packet.sequence, samples);
+
+        // Jitter buffer → drift-compensated resample → sink.
+        let n = jitter.read(&mut read_buf);
+        if n > 0 {
+            let resampler = resampler.as_mut().unwrap();
+            resampler.adjust_for_occupancy(jitter.buffered_frames(), jitter.target_frames());
+            let mut resampled = Vec::new();
+            resampler.process(&read_buf[..n], &mut resampled);
+            if let Some(sink) = sink.as_mut() {
+                sink.write_frames(&resampled).map_err(|e| anyhow!(e))?;
+            }
         }
 
         if received_packets.is_multiple_of(1000) {
+            let stats = jitter.stats();
             println!(
-                "[{received_packets} packets] rx {} bytes",
-                transport.stats().bytes_received()
+                "[{received_packets} packets] rx {} bytes | jitter: {} ms target, {} lost, {} late, {} underruns",
+                transport.stats().bytes_received(),
+                stats.latency.as_millis(),
+                stats.packets_lost,
+                stats.late_packets,
+                stats.underruns
             );
         }
     }
@@ -352,7 +467,13 @@ async fn run_serve(
 
     println!("Serving web client from {}", root.display());
     println!("Open http://{local} in a browser on this machine or your tablet/phone");
-    run_capture_loop(device, packet_frames, StreamSink::WebSocket(ws_server)).await
+    run_capture_loop(
+        device,
+        packet_frames,
+        Codec::Pcm,
+        StreamSink::WebSocket(ws_server),
+    )
+    .await
 }
 
 const MAX_REQUEST_BYTES: usize = 16 * 1024;
